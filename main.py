@@ -46,7 +46,7 @@ class pp():
                     x_size = int(x_size / image_ratio)
                     y_size = int(y_size / image_ratio)
 
-                    foo = foo.resize((x_size, y_size), Image.ANTIALIAS)
+                    foo = foo.resize((x_size, y_size), Image.Resampling.LANCZOS)
                     file_bytes = BytesIO()
                     foo.save(file_bytes, optimize=True, quality=95, format='jpeg')
                     size_in_bites = file_bytes.tell()
