@@ -2,3 +2,5 @@
 .pyc
 /HandBrakeCLI.exe
 /ffmpeg.exe
+/venv
+/activate.bat
