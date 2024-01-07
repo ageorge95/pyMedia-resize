@@ -7,7 +7,8 @@ from PIL import Image
 from sys import exit
 from os import listdir,\
     path
-from subprocess import call
+from subprocess import (call,
+                        check_output)
 
 # ########################################################################
 # #################### METHODS DEFINITION ################################
@@ -135,9 +136,9 @@ class ava_mux():
 
 if __name__ == '__main__': #don`t start the method if called from another script
 
-    if not all([path.isfile('ffmpeg.exe'),
-                path.isfile('HandBrakeCLI.exe')]):
-        exit('Conversion binaries missing (ffmpeg.exe, HandBrakeCLI.exe). Download them from here: https://1drv.ms/u/s!AiDIGJzt-XdW8v1jW0sCNvobl8_seg?e=c9h90Y')
+    if not all([check_output('where ffmpeg.exe').decode('utf-8').strip().endswith('.exe'),
+                check_output('where HandBrakeCLI.exe').decode('utf-8').strip().endswith('.exe')]):
+        exit('Conversion binaries missing (ffmpeg.exe, HandBrakeCLI.exe).')
 
     # get the required actions
     action = input('What would you like to do?'
