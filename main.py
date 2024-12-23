@@ -1,7 +1,3 @@
-# ########################################################################
-# #################### Python Imports ####################################
-# ########################################################################
-
 from io import BytesIO
 from PIL import Image
 from sys import exit
@@ -9,6 +5,13 @@ from os import listdir,\
     path
 from subprocess import (call,
                         check_output)
+
+VALID_EXTENSIONS = {
+    'picture': ['.jpg', '.jpeg', '.png'],
+    'video': ['.mp4', '.avi', '.webm'],
+    'audio': ['.mp3', '.m4a']
+}
+
 
 # ########################################################################
 # #################### METHODS DEFINITION ################################
@@ -26,8 +29,7 @@ class pp():
 
         for input_entry in listdir('input'):
             if input_entry != 'delete-me' and\
-                    any([input_entry.endswith(_) for _ in ['JPG', 'jpg', 'jpeg',
-                                                           'PNG', 'png']]):
+                    any([input_entry.lower().endswith(_) for _ in VALID_EXTENSIONS['picture']]):
                 foo = Image.open(path.join("input", input_entry))
                 size = foo.size
                 x_size = size[0]
@@ -106,12 +108,12 @@ class ava_mux():
         all_filenames = listdir('input')
         for input_entry in all_filenames_no_ext:
             current_pair = {'filename_no_ext': input_entry}
-            for audio_ext in ['m4a']:
-                if f"{input_entry}.{audio_ext}" in all_filenames:
+            for audio_ext in VALID_EXTENSIONS['audio']:
+                if f"{input_entry}{audio_ext}" in all_filenames:
                     current_pair['audio'] = f"{input_entry}.{audio_ext}"
                     break
-            for video_ext in ['webm', 'mp4']:
-                if f"{input_entry}.{video_ext}" in all_filenames:
+            for video_ext in VALID_EXTENSIONS['video']:
+                if f"{input_entry}{video_ext}" in all_filenames:
                     current_pair['video'] = f"{input_entry}.{video_ext}"
                     break
 
@@ -130,6 +132,33 @@ class ava_mux():
                  f" -i \"{path.join('input', pair['audio'])}\""
                  f" -c copy \"{path.join('converted', pair['filename_no_ext'])}.mkv\"")
 
+class vv_join():
+    def __init__(self):
+        pass
+
+    def do(self):
+
+        video_filename_to_join = []
+        for input_entry in listdir('input'):
+            if input_entry != 'delete-me' and\
+                    any([input_entry.lower().endswith(_) for _ in VALID_EXTENSIONS['video']]):
+                video_filename_to_join.append(input_entry)
+
+        print(f'Found {len(video_filename_to_join)} valid input files')
+
+        if video_filename_to_join:
+            with open('filelist.txt', 'w', encoding='utf-8') as output_file_handle:
+                output_file_handle.writelines('\n'.join([f'file \'{path.join('input', _)}\'' for _ in video_filename_to_join]))
+
+            call(['ffmpeg',
+                  '-f', 'concat',
+                  '-safe', '0',
+                  '-i', 'filelist.txt',
+                  '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
+                  '-c:a', 'aac', '-b:a', '192k',
+                  r'converted\output.mp4']
+                 )
+
 # ########################################################################
 # #################### MAIN SCRIPT #######################################
 # ########################################################################
@@ -147,12 +176,14 @@ if __name__ == '__main__': #don`t start the method if called from another script
                     '\n\tConvert audio | video -> audio: ava'
                     '\n\tCut audio | video: ava_cut'
                     '\n\tMux audio | video: ava_mux'
+                    '\n\tJoin video | video: vv_join'
                     '\n\t_')
     if action not in ['pp',
                       'vv',
                       'ava',
                       'ava_cut',
-                      'ava_mux']:
+                      'ava_mux',
+                      'vv_join']:
         exit(f"Your action {action} is not in preconfigured list of actions !")
 
     globals()[action]().do()
