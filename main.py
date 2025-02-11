@@ -8,7 +8,7 @@ from subprocess import (call,
 
 VALID_EXTENSIONS = {
     'picture': ['.jpg', '.jpeg', '.png'],
-    'video': ['.mp4', '.avi', '.webm'],
+    'video': ['.mp4', '.avi', '.webm', '.mkv'],
     'audio': ['.mp3', '.m4a']
 }
 
