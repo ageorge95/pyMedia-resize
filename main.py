@@ -1,10 +1,13 @@
 from io import BytesIO
 from PIL import Image
 from sys import exit
-from os import listdir,\
-    path
+from os import (listdir,
+                path,
+                makedirs)
 from subprocess import (call,
                         check_output)
+from multiprocessing import (Pool,
+                             cpu_count)
 
 VALID_EXTENSIONS = {
     'picture': ['.jpg', '.jpeg', '.png'],
@@ -17,48 +20,62 @@ VALID_EXTENSIONS = {
 # #################### METHODS DEFINITION ################################
 # ########################################################################
 
-class pp():
+class pp:
     def __init__(self):
-        self.picture_target_mb = float(input('picture target (MB):_'))
+        self.picture_target_mb = float(input('Picture target (MB): '))
+        self.input_dir = 'input'
+        self.output_dir = 'converted'
+        makedirs(self.output_dir, exist_ok=True)
 
-    def do(self):
-
-        # ratio used in each iteration, the lower this number is,
-        # more time will be required for the conversion but the output size will be closer to the target
+    def process_image(self, args):
+        input_entry, picture_target_mb, input_dir, output_dir = args
         image_ratio = 1.1
+        try:
+            input_path = path.join(input_dir, input_entry)
+            original = Image.open(input_path)
+            original = original.convert("RGB")
 
-        for input_entry in listdir('input'):
-            if input_entry != 'delete-me' and\
-                    any([input_entry.lower().endswith(_) for _ in VALID_EXTENSIONS['picture']]):
-                foo = Image.open(path.join("input", input_entry))
-                size = foo.size
-                x_size = size[0]
-                y_size = size[1]
+            x_size, y_size = original.size
+            current_image = original.resize((int(x_size / image_ratio), int(y_size / image_ratio)), Image.Resampling.LANCZOS)
 
+            file_bytes = BytesIO()
+            current_image.save(file_bytes, optimize=True, quality=95, format='jpeg')
+            size_in_bytes = file_bytes.tell()
+
+            if size_in_bytes / 1024 / 1024 <= picture_target_mb:
+                output_path = path.join(output_dir, input_entry.rsplit('.', 1)[0] + '.jpeg')
+                current_image.save(output_path, optimize=True, quality=95, format='jpeg')
+                return f"Picture converted (no resize loop needed): {input_entry}"
+
+            resized = current_image
+            while size_in_bytes / 1024 / 1024 > picture_target_mb:
                 x_size = int(x_size / image_ratio)
                 y_size = int(y_size / image_ratio)
-
-                foo = foo.resize((x_size, y_size), Image.Resampling.LANCZOS)
-                # convert to RGB because a PNG input file would have an alpha channel and an exception would be thrown when the image was to be saved
-                foo = foo.convert("RGB")
+                resized = original.resize((x_size, y_size), Image.Resampling.LANCZOS)
                 file_bytes = BytesIO()
-                foo.save(file_bytes, optimize=True, quality=95, format='jpeg')
-                size_in_bites = file_bytes.tell()
+                resized.save(file_bytes, optimize=True, quality=95, format='jpeg')
+                size_in_bytes = file_bytes.tell()
 
-                while size_in_bites / 1024 / 1024 > self.picture_target_mb:
-                    x_size = int(x_size / image_ratio)
-                    y_size = int(y_size / image_ratio)
+            output_path = path.join(output_dir, input_entry.rsplit('.', 1)[0] + '.jpeg')
+            resized.save(output_path, optimize=True, quality=95, format='jpeg')
+            return f"Picture converted: {input_entry}"
 
-                    foo = foo.resize((x_size, y_size), Image.Resampling.LANCZOS)
-                    file_bytes = BytesIO()
-                    foo.save(file_bytes, optimize=True, quality=95, format='jpeg')
-                    size_in_bites = file_bytes.tell()
+        except Exception as e:
+            return f"Error processing {input_entry}: {e}"
 
-                foo.save(path.join("converted", input_entry.rsplit('.', 1)[0] + '.jpeg'), optimize=True, quality=95, format='jpeg')
+    def do(self):
+        entries = [entry for entry in listdir(self.input_dir)
+                   if entry != 'delete-me' and entry.lower().endswith(tuple(VALID_EXTENSIONS['picture']))]
 
-                print("Picture converted: ", input_entry)
+        args = [(entry, self.picture_target_mb, self.input_dir, self.output_dir) for entry in entries]
 
-class vv():
+        with Pool(processes=cpu_count()) as pool:
+            results = pool.map(self.process_image, args)
+
+        for result in results:
+            print(result)
+
+class vv:
     def do(self):
         for input_entry in listdir('input'):
             if input_entry != 'delete-me':
@@ -69,7 +86,7 @@ class vv():
                       '-w 1280', '-l 720',
                       '-q 23'], shell=True)
 
-class ava():
+class ava:
     def do(self):
         for input_entry in listdir('input'):
             if input_entry != 'delete-me':
@@ -77,7 +94,7 @@ class ava():
                 call((f"ffmpeg.exe -i \"{path.join('input', input_entry)}\""
                       f" -acodec libmp3lame -q:a 3 -vn \"{path.join('converted', input_entry)}.mp3\""))
 
-class ava_cut():
+class ava_cut:
     def __init__(self):
 
         self.tasks = {}
@@ -94,7 +111,7 @@ class ava_cut():
                  f" -i \"{path.join('input', task)}\""
                  f" -c copy -t {description['end']} \"{path.join('converted', task)}\"")
 
-class ava_mux():
+class ava_mux:
     def __init__(self):
         print('Scanning input for relevant video and audio files ...')
         all_filenames_no_ext = set([path.basename(_).rsplit('.', 1)[0] for _ in listdir('input')])
@@ -132,7 +149,7 @@ class ava_mux():
                  f" -i \"{path.join('input', pair['audio'])}\""
                  f" -c copy \"{path.join('converted', pair['filename_no_ext'])}.mkv\"")
 
-class vv_join():
+class vv_join:
     def __init__(self):
         pass
 
