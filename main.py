@@ -32,18 +32,23 @@ class pp:
         image_ratio = 1.1
         try:
             input_path = path.join(input_dir, input_entry)
-            original = Image.open(input_path)
-            original = original.convert("RGB")
+            original = Image.open(input_path).convert('RGB')
 
             x_size, y_size = original.size
-            current_image = original.resize((int(x_size / image_ratio), int(y_size / image_ratio)), Image.Resampling.LANCZOS)
+            current_image = original.resize(
+                (int(x_size / image_ratio), int(y_size / image_ratio)),
+                Image.Resampling.LANCZOS
+            )
 
             file_bytes = BytesIO()
             current_image.save(file_bytes, optimize=True, quality=95, format='jpeg')
             size_in_bytes = file_bytes.tell()
 
             if size_in_bytes / 1024 / 1024 <= picture_target_mb:
-                output_path = path.join(output_dir, input_entry.rsplit('.', 1)[0] + '.jpeg')
+                output_path = path.join(
+                    output_dir,
+                    input_entry.rsplit('.', 1)[0] + '.jpeg'
+                )
                 current_image.save(output_path, optimize=True, quality=95, format='jpeg')
                 return f"Picture converted (no resize loop needed): {input_entry}"
 
@@ -56,24 +61,41 @@ class pp:
                 resized.save(file_bytes, optimize=True, quality=95, format='jpeg')
                 size_in_bytes = file_bytes.tell()
 
-            output_path = path.join(output_dir, input_entry.rsplit('.', 1)[0] + '.jpeg')
+            output_path = path.join(
+                output_dir,
+                input_entry.rsplit('.', 1)[0] + '.jpeg'
+            )
             resized.save(output_path, optimize=True, quality=95, format='jpeg')
             return f"Picture converted: {input_entry}"
 
         except Exception as e:
             return f"Error processing {input_entry}: {e}"
 
-    def do(self):
-        entries = [entry for entry in listdir(self.input_dir)
-                   if entry != 'delete-me' and entry.lower().endswith(tuple(VALID_EXTENSIONS['picture']))]
+    def on_success(self, message):
+        # Called as each job finishes
+        print(message)
 
-        args = [(entry, self.picture_target_mb, self.input_dir, self.output_dir) for entry in entries]
+    def do(self):
+        entries = [
+            entry for entry in listdir(self.input_dir)
+            if entry != 'delete-me' and entry.lower().endswith(tuple(VALID_EXTENSIONS['picture']))
+        ]
+
+        args = [
+            (entry, self.picture_target_mb, self.input_dir, self.output_dir)
+            for entry in entries
+        ]
 
         with Pool(processes=cpu_count()) as pool:
-            results = pool.map(self.process_image, args)
+            for arg in args:
+                pool.apply_async(
+                    self.process_image,
+                    args=(arg,),
+                    callback=self.on_success
+                )
 
-        for result in results:
-            print(result)
+            pool.close()
+            pool.join()
 
 class vv:
     def do(self):
