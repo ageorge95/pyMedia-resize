@@ -1,5 +1,6 @@
 from io import BytesIO
 from PIL import Image
+from pillow_heif import register_heif_opener
 from sys import exit
 from os import (listdir,
                 path,
@@ -10,11 +11,15 @@ from multiprocessing import (Pool,
                              cpu_count)
 
 VALID_EXTENSIONS = {
-    'picture': ['.jpg', '.jpeg', '.png'],
+    'picture': ['.jpg', '.jpeg', '.png', '.heic'],
     'video': ['.mp4', '.avi', '.webm', '.mkv'],
     'audio': ['.mp3', '.m4a']
 }
 
+# ########################################################################
+# #################### Additional PREREQUISITES ##########################
+# ########################################################################
+register_heif_opener()
 
 # ########################################################################
 # #################### METHODS DEFINITION ################################
