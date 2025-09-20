@@ -106,12 +106,28 @@ class vv:
     def do(self):
         for input_entry in listdir('input'):
             if input_entry != 'delete-me':
-                print(f"Converting video: {input_entry} ...")
-                call(['HandBrakeCLI.exe',
-                      '-i' + path.abspath((path.join('input', input_entry))),
-                      '-o' + r'converted\\' + str(input_entry.rsplit('.', 1)[0]) + '.mp4',
-                      '-w 1280', '-l 720',
-                      '-q 23'], shell=True)
+                # Ask user for mode
+                mode = input("Choose mode: Default [D], Portrait [P], Landscape [L]: ").strip().upper()
+
+                # Set HandBrake arguments based on choice
+                if mode == 'P':
+                    max_width, max_height = 720, 1280
+                elif mode == 'L':
+                    max_width, max_height = 1280, 720
+                else:  # Default
+                    max_width, max_height = 1280, 720  # or any default you prefer
+
+                print(f"Converting video: {input_entry} ... (mode={mode})")
+
+                call([
+                    'HandBrakeCLI.exe',
+                    '-i', path.abspath(path.join('input', input_entry)),
+                    '-o', path.join('converted', f"{input_entry.rsplit('.', 1)[0]}.mp4"),
+                    '-q', '23',
+                    f'--maxWidth={max_width}',
+                    f'--maxHeight={max_height}',
+                    '--keep-display-aspect'
+                ], shell=True)
 
 class ava:
     def do(self):
