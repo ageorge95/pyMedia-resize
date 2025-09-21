@@ -9,6 +9,7 @@ from subprocess import (call,
                         check_output)
 from multiprocessing import (Pool,
                              cpu_count)
+from shutil import copyfile
 
 VALID_EXTENSIONS = {
     'picture': ['.jpg', '.jpeg', '.png', '.heic'],
@@ -33,11 +34,27 @@ class pp:
         makedirs(self.output_dir, exist_ok=True)
 
     def process_image(self, args):
-        input_entry, picture_target_mb, input_dir, output_dir = args
         image_ratio = 1.1
+        heic_quality = 80
+        max_iterations = 20  # Safety limit
+
+        input_entry, picture_target_mb, input_dir, output_dir = args
+
         try:
             input_path = path.join(input_dir, input_entry)
+            output_path = path.join(output_dir, input_entry)
+
+            # Check original file size first
+            original_size_mb = path.getsize(input_path) / 1024 / 1024
+
+            if original_size_mb <= picture_target_mb:
+                # Just copy the input file if it's already small enough
+                copyfile(input_path, output_path)
+                return f"File already small enough, copied directly: {input_entry}"
+
+            # Open the image for processing
             original = Image.open(input_path).convert('RGB')
+            output_path_heic = path.join(output_dir, input_entry.rsplit('.', 1)[0] + '.heic')
 
             x_size, y_size = original.size
             current_image = original.resize(
@@ -45,32 +62,37 @@ class pp:
                 Image.Resampling.LANCZOS
             )
 
+            # Check size with BytesIO
             file_bytes = BytesIO()
-            current_image.save(file_bytes, optimize=True, quality=95, format='jpeg')
+            current_image.save(file_bytes, format='heif', quality=heic_quality)
             size_in_bytes = file_bytes.tell()
 
             if size_in_bytes / 1024 / 1024 <= picture_target_mb:
-                output_path = path.join(
-                    output_dir,
-                    input_entry.rsplit('.', 1)[0] + '.jpeg'
-                )
-                current_image.save(output_path, optimize=True, quality=95, format='jpeg')
+                # Write the already-compressed BytesIO content directly to file
+                with open(output_path_heic, 'wb') as f:
+                    f.write(file_bytes.getvalue())
                 return f"Picture converted (no resize loop needed): {input_entry}"
 
-            resized = current_image
-            while size_in_bytes / 1024 / 1024 > picture_target_mb:
+            # Need further resizing
+            iteration = 0
+
+            while file_bytes.tell() / 1024 / 1024 > picture_target_mb and iteration < max_iterations:
+                iteration += 1
                 x_size = int(x_size / image_ratio)
                 y_size = int(y_size / image_ratio)
-                resized = original.resize((x_size, y_size), Image.Resampling.LANCZOS)
-                file_bytes = BytesIO()
-                resized.save(file_bytes, optimize=True, quality=95, format='jpeg')
-                size_in_bytes = file_bytes.tell()
+                optimal_size = (x_size, y_size)
 
-            output_path = path.join(
-                output_dir,
-                input_entry.rsplit('.', 1)[0] + '.jpeg'
-            )
-            resized.save(output_path, optimize=True, quality=95, format='jpeg')
+                # Check size with temporary resize and compression
+                temp_image = original.resize(optimal_size, Image.Resampling.LANCZOS)
+                file_bytes = BytesIO()
+                temp_image.save(file_bytes, format='heif', quality=heic_quality)
+
+            if iteration == max_iterations:
+                return f"Warning: Could not compress {input_entry} below target size"
+
+            # Write the last compressed version that was within limits
+            with open(output_path_heic, 'wb') as f:
+                f.write(file_bytes.getvalue())
             return f"Picture converted: {input_entry}"
 
         except Exception as e:
