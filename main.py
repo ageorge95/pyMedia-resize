@@ -126,11 +126,11 @@ class pp:
 
 class vv:
     def do(self):
+        # Ask user for mode
+        mode = input("Choose mode: Default [D], Portrait [P], Landscape [L]: ").strip().upper()
+
         for input_entry in listdir('input'):
             if input_entry != 'delete-me':
-                # Ask user for mode
-                mode = input("Choose mode: Default [D], Portrait [P], Landscape [L]: ").strip().upper()
-
                 # Set HandBrake arguments based on choice
                 if mode == 'P':
                     max_width, max_height = 720, 1280
