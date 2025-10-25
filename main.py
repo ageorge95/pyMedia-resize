@@ -185,7 +185,10 @@ class vv:
                     'HandBrakeCLI.exe',
                     '-i', path.abspath(path.join('input', input_entry)),
                     '-o', path.join('converted', f"{input_entry.rsplit('.', 1)[0]}.mp4"),
-                    '-q', '23',
+                    '-e', 'nvenc_h265',  # Use NVIDIA H.265 encoder
+                    '--encoder-preset', 'p4',  # Quality preset (p1-p7, p4=default)
+                    '--encoder-tune', 'hq',  # High quality tuning
+                    '--quality', '23',  # Lower number = higher quality (18-32 typical)
                     f'--maxWidth={max_width}',
                     f'--maxHeight={max_height}',
                     '--keep-display-aspect'
