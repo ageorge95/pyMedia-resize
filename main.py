@@ -1,3 +1,4 @@
+import math
 from io import BytesIO
 from PIL import Image
 from pillow_heif import register_heif_opener
@@ -12,9 +13,9 @@ from multiprocessing import (Pool,
 from shutil import copyfile
 
 VALID_EXTENSIONS = {
-    'picture': ['.jpg', '.jpeg', '.png', '.heic'],
-    'video': ['.mp4', '.avi', '.webm', '.mkv'],
-    'audio': ['.mp3', '.m4a']
+    'picture': ('.jpg', '.jpeg', '.png', '.heic'),
+    'video': ('.mp4', '.avi', '.webm', '.mkv'),
+    'audio': ('.mp3', '.m4a')
 }
 
 # ########################################################################
@@ -34,66 +35,102 @@ class pp:
         makedirs(self.output_dir, exist_ok=True)
 
     def process_image(self, args):
-        image_ratio = 1.1
-        heic_quality = 80
-        max_iterations = 20  # Safety limit
-
         input_entry, picture_target_mb, input_dir, output_dir = args
+        target_bytes = picture_target_mb * 1024 * 1024
 
         try:
             input_path = path.join(input_dir, input_entry)
-            output_path = path.join(output_dir, input_entry)
+            output_path = path.join(output_dir, input_entry.rsplit('.', 1)[0] + '.webp')
 
-            # Check original file size first
-            original_size_mb = path.getsize(input_path) / 1024 / 1024
-
-            if original_size_mb <= picture_target_mb:
-                # Just copy the input file if it's already small enough
+            original_size = path.getsize(input_path)
+            if original_size <= target_bytes and input_path.lower().endswith('.webp'):
                 copyfile(input_path, output_path)
-                return f"File already small enough, copied directly: {input_entry}"
+                return f"Already under target: {input_entry}"
 
-            # Open the image for processing
-            original = Image.open(input_path).convert('RGB')
-            output_path_heic = path.join(output_dir, input_entry.rsplit('.', 1)[0] + '.heic')
+            with Image.open(input_path) as img:
+                if img.mode in ('RGBA', 'P'):
+                    img = img.convert('RGBA')
+                else:
+                    img = img.convert('RGB')
 
-            x_size, y_size = original.size
-            current_image = original.resize(
-                (int(x_size / image_ratio), int(y_size / image_ratio)),
-                Image.Resampling.LANCZOS
-            )
+                original_width, original_height = img.size
 
-            # Check size with BytesIO
-            file_bytes = BytesIO()
-            current_image.save(file_bytes, format='heif', quality=heic_quality)
-            size_in_bytes = file_bytes.tell()
+                # Strategy: Prefer quality reduction over resolution reduction
+                # Try full resolution with decreasing quality first
+                best_approach = None
+                best_data = None
+                best_size = 0
+                best_metadata = ""
+                best_quality_value = 0  # Track quality as numeric value for scoring
 
-            if size_in_bytes / 1024 / 1024 <= picture_target_mb:
-                # Write the already-compressed BytesIO content directly to file
-                with open(output_path_heic, 'wb') as f:
-                    f.write(file_bytes.getvalue())
-                return f"Picture converted (no resize loop needed): {input_entry}"
+                # Approach 1: Maximum quality at full resolution
+                for quality in range(95, 49, -5):  # 95 down to 50
+                    buffer = BytesIO()
+                    img.save(buffer, format='WEBP', quality=quality, method=4)
+                    current_size = buffer.tell()
 
-            # Need further resizing
-            iteration = 0
+                    if current_size <= target_bytes:
+                        utilization = current_size / target_bytes
 
-            while file_bytes.tell() / 1024 / 1024 > picture_target_mb and iteration < max_iterations:
-                iteration += 1
-                x_size = int(x_size / image_ratio)
-                y_size = int(y_size / image_ratio)
-                optimal_size = (x_size, y_size)
+                        # If we're using a good portion of the budget, take it
+                        if utilization > 0.7 or quality == 50:  # Or we've hit minimum acceptable quality
+                            best_approach = "full_res"
+                            best_data = buffer.getvalue()
+                            best_size = current_size
+                            best_metadata = f"Q{quality}"
+                            best_quality_value = quality
+                            break
 
-                # Check size with temporary resize and compression
-                temp_image = original.resize(optimal_size, Image.Resampling.LANCZOS)
-                file_bytes = BytesIO()
-                temp_image.save(file_bytes, format='heif', quality=heic_quality)
+                # Approach 2: If full resolution doesn't work well, try minimal resizing with high quality
+                if best_data is None or best_size < target_bytes * 0.5:
+                    # We have lots of space or full res didn't work, try smart resizing
+                    test_scenarios = [
+                        (0.95, 90), (0.9, 85), (0.85, 85), (0.8, 80),
+                        (0.75, 80), (0.7, 75), (0.6, 75), (0.5, 70)
+                    ]
 
-            if iteration == max_iterations:
-                return f"Warning: Could not compress {input_entry} below target size"
+                    for ratio, quality in test_scenarios:
+                        new_width = max(100, int(original_width * ratio))
+                        new_height = max(100, int(original_height * ratio))
 
-            # Write the last compressed version that was within limits
-            with open(output_path_heic, 'wb') as f:
-                f.write(file_bytes.getvalue())
-            return f"Picture converted: {input_entry}"
+                        resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                        buffer = BytesIO()
+                        resized.save(buffer, format='WEBP', quality=quality, method=4)
+                        current_size = buffer.tell()
+
+                        if current_size <= target_bytes:
+                            utilization = current_size / target_bytes
+                            current_score = utilization * quality  # Simple quality-score metric
+
+                            # Calculate best_score using the stored quality value
+                            best_utilization = best_size / target_bytes if best_size > 0 else 0
+                            best_score = best_utilization * best_quality_value
+
+                            # Prefer this if it's significantly better or we have no solution
+                            if current_score > best_score * 1.1 or best_data is None:
+                                best_approach = "resized"
+                                best_data = buffer.getvalue()
+                                best_size = current_size
+                                best_metadata = f"Q{quality}@{ratio:.0%}"
+                                best_quality_value = quality
+
+                                if utilization > 0.85:  # Good budget utilization
+                                    break
+
+                # Save the best result
+                if best_data:
+                    with open(output_path, 'wb') as f:
+                        f.write(best_data)
+                    size_mb = best_size / 1024 / 1024
+                    utilization_pct = (best_size / target_bytes) * 100
+                    return f"WebP ({best_approach}): {input_entry} ({size_mb:.2f}MB, {best_metadata}, {utilization_pct:.1f}% budget)"
+                else:
+                    # Ultimate fallback - prioritize resolution
+                    new_width = max(800, int(original_width * 0.7))
+                    new_height = max(600, int(original_height * 0.7))
+                    resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                    resized.save(output_path, format='WEBP', quality=80, method=4)
+                    return f"WebP fallback: {input_entry}"
 
         except Exception as e:
             return f"Error processing {input_entry}: {e}"
@@ -105,7 +142,7 @@ class pp:
     def do(self):
         entries = [
             entry for entry in listdir(self.input_dir)
-            if entry != 'delete-me' and entry.lower().endswith(tuple(VALID_EXTENSIONS['picture']))
+            if entry != 'delete-me' and entry.lower().endswith(VALID_EXTENSIONS['picture'])
         ]
 
         args = [
@@ -113,7 +150,10 @@ class pp:
             for entry in entries
         ]
 
-        with Pool(processes=cpu_count()) as pool:
+        # Use fewer processes for memory efficiency with WebP
+        num_processes = max(2, cpu_count() - 1)
+
+        with Pool(processes=num_processes) as pool:
             for arg in args:
                 pool.apply_async(
                     self.process_image,
