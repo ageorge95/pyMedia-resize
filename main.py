@@ -1,6 +1,6 @@
-import math
 from io import BytesIO
-from PIL import Image
+from PIL import (Image,
+                 ImageOps)
 from pillow_heif import register_heif_opener
 from sys import exit
 from os import (listdir,
@@ -13,10 +13,13 @@ from multiprocessing import (Pool,
 from shutil import copyfile
 
 VALID_EXTENSIONS = {
-    'picture': ('.jpg', '.jpeg', '.png', '.heic'),
+    'picture': ('.jpg', '.jpeg', '.png', '.heic', '.webp', '.avif'),
     'video': ('.mp4', '.avi', '.webm', '.mkv'),
     'audio': ('.mp3', '.m4a')
 }
+
+# AVIF encoder speed: 0 (slowest, smallest files) .. 10 (fastest). 6 is Pillow's default.
+AVIF_SPEED = 6
 
 # ########################################################################
 # #################### Additional PREREQUISITES ##########################
@@ -34,20 +37,43 @@ class pp:
         self.output_dir = 'converted'
         makedirs(self.output_dir, exist_ok=True)
 
+    @staticmethod
+    def get_metadata(img):
+        """Extract EXIF, ICC color profile and XMP so they can be passed to the AVIF encoder."""
+        metadata = {}
+
+        exif = img.getexif()
+        if exif:
+            metadata['exif'] = exif
+
+        for key in ('icc_profile', 'xmp'):
+            value = img.info.get(key)
+            if value:
+                metadata[key] = value
+
+        return metadata
+
     def process_image(self, args):
         input_entry, picture_target_mb, input_dir, output_dir = args
         target_bytes = picture_target_mb * 1024 * 1024
 
         try:
             input_path = path.join(input_dir, input_entry)
-            output_path = path.join(output_dir, input_entry.rsplit('.', 1)[0] + '.webp')
+            output_path = path.join(output_dir, input_entry.rsplit('.', 1)[0] + '.avif')
 
             original_size = path.getsize(input_path)
-            if original_size <= target_bytes and input_path.lower().endswith('.webp'):
+            if original_size <= target_bytes and input_path.lower().endswith('.avif'):
                 copyfile(input_path, output_path)
                 return f"Already under target: {input_entry}"
 
             with Image.open(input_path) as img:
+                # Apply the EXIF orientation to the pixels (and reset the tag to 1),
+                # so the picture is displayed correctly even by viewers ignoring rotation flags
+                img = ImageOps.exif_transpose(img)
+
+                # Collect metadata to be written into the output AVIF
+                metadata = self.get_metadata(img)
+
                 if img.mode in ('RGBA', 'P'):
                     img = img.convert('RGBA')
                 else:
@@ -66,7 +92,7 @@ class pp:
                 # Approach 1: Maximum quality at full resolution
                 for quality in range(95, 49, -5):  # 95 down to 50
                     buffer = BytesIO()
-                    img.save(buffer, format='WEBP', quality=quality, method=4)
+                    img.save(buffer, format='AVIF', quality=quality, speed=AVIF_SPEED, **metadata)
                     current_size = buffer.tell()
 
                     if current_size <= target_bytes:
@@ -95,7 +121,7 @@ class pp:
 
                         resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
                         buffer = BytesIO()
-                        resized.save(buffer, format='WEBP', quality=quality, method=4)
+                        resized.save(buffer, format='AVIF', quality=quality, speed=AVIF_SPEED, **metadata)
                         current_size = buffer.tell()
 
                         if current_size <= target_bytes:
@@ -123,14 +149,14 @@ class pp:
                         f.write(best_data)
                     size_mb = best_size / 1024 / 1024
                     utilization_pct = (best_size / target_bytes) * 100
-                    return f"WebP ({best_approach}): {input_entry} ({size_mb:.2f}MB, {best_metadata}, {utilization_pct:.1f}% budget)"
+                    return f"AVIF ({best_approach}): {input_entry} ({size_mb:.2f}MB, {best_metadata}, {utilization_pct:.1f}% budget)"
                 else:
                     # Ultimate fallback - prioritize resolution
                     new_width = max(800, int(original_width * 0.7))
                     new_height = max(600, int(original_height * 0.7))
                     resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                    resized.save(output_path, format='WEBP', quality=80, method=4)
-                    return f"WebP fallback: {input_entry}"
+                    resized.save(output_path, format='AVIF', quality=80, speed=AVIF_SPEED, **metadata)
+                    return f"AVIF fallback: {input_entry}"
 
         except Exception as e:
             return f"Error processing {input_entry}: {e}"
@@ -150,7 +176,7 @@ class pp:
             for entry in entries
         ]
 
-        # Use fewer processes for memory efficiency with WebP
+        # Use fewer processes for memory efficiency with AVIF
         num_processes = max(2, cpu_count() - 1)
 
         with Pool(processes=num_processes) as pool:
