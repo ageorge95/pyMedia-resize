@@ -5,3 +5,5 @@
 /venv
 /activate.bat
 /filelist.txt
+/activate.ps1
+/activate.sh
